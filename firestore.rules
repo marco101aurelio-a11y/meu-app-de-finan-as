@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid, displayName, email, photoURL, totalBalance, createdAt
+    //
+    // Collection: transactions
+    // Fields: userId, amount, type, category, description, date, createdAt
+    //
+    // Collection: budgets
+    // Fields: userId, category, limit, spent, month
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid is string &&
+             data.email is string &&
+             (!('totalBalance' in data) || data.totalBalance is number);
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['userId', 'amount', 'type', 'category', 'date']) &&
+             data.userId == request.auth.uid &&
+             data.amount is number &&
+             data.type in ['income', 'expense'] &&
+             data.category is string &&
+             data.category.size() < 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() < 500));
+    }
+
+    function isValidBudget(data) {
+      return data.keys().hasAll(['userId', 'category', 'limit', 'month']) &&
+             data.userId == request.auth.uid &&
+             data.limit is number &&
+             data.category is string &&
+             data.month is string;
+    }
+
+    // Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if isDocOwner() && isValidTransaction(request.resource.data);
+      allow delete: if isDocOwner();
+    }
+
+    match /budgets/{budgetId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidBudget(request.resource.data);
+      allow update: if isDocOwner() && isValidBudget(request.resource.data);
+      allow delete: if isDocOwner();
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "marco101aurelio@gmail.com" && request.auth.token.email_verified == true));
+    }
+  }
+}
